@@ -290,10 +290,13 @@ static int ath10k_send_key(struct ath10k_vif *arvif,
 		key->flags |= IEEE80211_KEY_FLAG_GENERATE_IV;
 
 	if (cmd == DISABLE_KEY) {
-		if (flags & WMI_KEY_GROUP) {
-			/* Not all hardware handles group-key deletion operation
-			 * correctly. Replace the key with a junk value to invalidate it.
-			 */
+		/* Not all hardware handles group-key deletion operation
+		 * correctly. Replace the key with a junk value to invalidate it.
+		 * WCN3990 firmware WLAN.HL.1.0 (MSM8998) hangs on a pairwise one
+		 * as well, until its watchdog takes the modem down: every
+		 * disconnect crashed it. Invalidate pairwise keys the same way.
+		 */
+		if (flags & WMI_KEY_GROUP || ar->hw_rev == ATH10K_HW_WCN3990) {
 			get_random_bytes(key->key, key->keylen);
 		} else {
 			arg.key_cipher = ar->wmi_key_cipher[WMI_CIPHER_NONE];
