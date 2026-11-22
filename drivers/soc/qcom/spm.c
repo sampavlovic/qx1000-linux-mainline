@@ -104,16 +104,22 @@ static const struct spm_reg_data spm_reg_660_silver_l2  = {
 	.avs_limit = 0x4580458,
 };
 
+/*
+ * The wahoo vendor tree programs 0x4580458 (1112 mV) on both clusters
+ * (msm8998-pm.dtsi qcom,saw2-avs-limit); the values that came with this
+ * table (0x4700470 gold / 0x4200420 silver) clamp silver at 1056 mV,
+ * below its top CPRh ceilings.
+ */
 static const struct spm_reg_data spm_reg_8998_gold_l2  = {
 	.reg_offset = spm_reg_offset_v4_1,
 	.avs_ctl = 0x1010031,
-	.avs_limit = 0x4700470,
+	.avs_limit = 0x4580458,
 };
 
 static const struct spm_reg_data spm_reg_8998_silver_l2  = {
 	.reg_offset = spm_reg_offset_v4_1,
 	.avs_ctl = 0x1010031,
-	.avs_limit = 0x4200420,
+	.avs_limit = 0x4580458,
 };
 
 static const u16 spm_reg_offset_v3_0[SPM_REG_NR] = {
