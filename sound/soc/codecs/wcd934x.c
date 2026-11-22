@@ -519,6 +519,25 @@ static const struct regmap_config wcd934x_ifc_regmap_config = {
 	.num_ranges = ARRAY_SIZE(wcd934x_ifc_ranges),
 };
 
+#define WCD934X_NUM_DECIMATORS		9
+#define WCD934X_TX_PGA_MUTE		0x10
+
+/*
+ * Delay before the TX PGA mute is removed, matching the vendor driver. The
+ * unmute cannot be done inline from POST_PMU: DAPM powers the microphone
+ * widget after this one, so an inline write lands while the decimator still
+ * has no clock and merely unmutes a stalled filter.
+ */
+#define WCD934X_TX_UNMUTE_DELAY_MS	40
+
+struct wcd934x_mute_work {
+	struct wcd934x_codec *wcd;
+	u8 decimator;
+	struct delayed_work dwork;
+};
+
+static void wcd934x_tx_mute_update_callback(struct work_struct *work);
+
 struct wcd934x_codec {
 	struct device *dev;
 	struct clk_hw hw;
@@ -533,6 +552,7 @@ struct wcd934x_codec {
 	struct wcd934x_slim_ch rx_chs[WCD934X_RX_MAX];
 	struct wcd934x_slim_ch tx_chs[WCD934X_TX_MAX];
 	struct wcd_slim_codec_dai_data dai[NUM_CODEC_DAIS];
+	struct wcd934x_mute_work tx_mute_dwork[WCD934X_NUM_DECIMATORS];
 	int rate;
 	u32 version;
 	u32 hph_mode;
@@ -3029,6 +3049,13 @@ static int wcd934x_comp_probe(struct snd_soc_component *component)
 	for (i = 0; i < NUM_CODEC_DAIS; i++)
 		INIT_LIST_HEAD(&wcd->dai[i].slim_ch_list);
 
+	for (i = 0; i < WCD934X_NUM_DECIMATORS; i++) {
+		wcd->tx_mute_dwork[i].wcd = wcd;
+		wcd->tx_mute_dwork[i].decimator = i;
+		INIT_DELAYED_WORK(&wcd->tx_mute_dwork[i].dwork,
+				  wcd934x_tx_mute_update_callback);
+	}
+
 
 	ret = wcd934x_init_dmic(component);
 	if (ret) {
@@ -4936,10 +4963,25 @@ static u16 wcd934x_codec_get_amic_pwlvl_reg(struct snd_soc_component *comp,
 	return pwr_level_reg;
 }
 
+static void wcd934x_tx_mute_update_callback(struct work_struct *work)
+{
+	struct delayed_work *dw = to_delayed_work(work);
+	struct wcd934x_mute_work *mute_work =
+		container_of(dw, struct wcd934x_mute_work, dwork);
+	struct snd_soc_component *comp = mute_work->wcd->component;
+	u16 tx_vol_ctl_reg;
+
+	tx_vol_ctl_reg = WCD934X_CDC_TX0_TX_PATH_CTL +
+			 16 * mute_work->decimator;
+	snd_soc_component_update_bits(comp, tx_vol_ctl_reg,
+				      WCD934X_TX_PGA_MUTE, 0);
+}
+
 static int wcd934x_codec_enable_dec(struct snd_soc_dapm_widget *w,
 				    struct snd_kcontrol *kcontrol, int event)
 {
 	struct snd_soc_component *comp = snd_soc_dapm_to_component(w->dapm);
+	struct wcd934x_codec *wcd = dev_get_drvdata(comp->dev);
 	unsigned int decimator;
 	char *dec_adc_mux_name = NULL;
 	char *widget_name;
@@ -5032,12 +5074,20 @@ static int wcd934x_codec_enable_dec(struct snd_soc_dapm_widget *w,
 				      WCD934X_HPH_CUTOFF_FREQ_CHANGE_REQ_MASK,
 				      0);
 		}
+		schedule_delayed_work(&wcd->tx_mute_dwork[decimator].dwork,
+				      msecs_to_jiffies(WCD934X_TX_UNMUTE_DELAY_MS));
+
 		/* apply gain after decimator is enabled */
 		snd_soc_component_write(comp, tx_gain_ctl_reg,
 					snd_soc_component_read(comp,
 							 tx_gain_ctl_reg));
 		break;
 	case SND_SOC_DAPM_PRE_PMD:
+		snd_soc_component_update_bits(comp, tx_vol_ctl_reg,
+					      WCD934X_TX_PGA_MUTE,
+					      WCD934X_TX_PGA_MUTE);
+		cancel_delayed_work_sync(&wcd->tx_mute_dwork[decimator].dwork);
+
 		hpf_coff_freq = (snd_soc_component_read(comp, dec_cfg_reg) &
 				 TX_HPF_CUT_OFF_FREQ_MASK) >> 5;
 
@@ -5060,7 +5110,7 @@ static int wcd934x_codec_enable_dec(struct snd_soc_dapm_widget *w,
 		break;
 	case SND_SOC_DAPM_POST_PMD:
 		snd_soc_component_update_bits(comp, tx_vol_ctl_reg,
-					      0x10, 0x00);
+					      WCD934X_TX_PGA_MUTE, 0);
 		snd_soc_component_update_bits(comp, dec_cfg_reg,
 					      WCD934X_DEC_PWR_LVL_MASK,
 					      WCD934X_DEC_PWR_LVL_DF);
