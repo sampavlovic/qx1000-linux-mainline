@@ -1113,6 +1113,99 @@ static int qcom_slim_ngd_enable_stream(struct slim_stream_runtime *rt)
 	return ret;
 }
 
+/*
+ * Tear the data channels down again.
+ *
+ * The generic teardown in slim_stream_disable() cannot stand in for this on a
+ * satellite controller: it sends NEXT_DEACTIVATE_CHANNEL and
+ * NEXT_REMOVE_CHANNEL as MT_CORE messages, and qcom_slim_ngd_xfer_msg() drops
+ * every MT_CORE message in the reconfiguration range on the floor and returns
+ * success. The bus manager lives on the ADSP here and only listens to the
+ * MT_DEST_REFERRED_USER forms, of which SLIM_USR_MC_CHAN_CTRL is the
+ * counterpart of the SLIM_USR_MC_DEF_ACT_CHAN sent above.
+ *
+ * The payload matches the vendor driver: a control byte carrying SLIM_CH_REMOVE
+ * in the top two bits and the low five bits of the client's logical address, a
+ * transaction id, then one byte per channel, followed by a reconfiguration
+ * request to make it take effect.
+ */
+#define SLIM_CH_REMOVE 2
+
+static int qcom_slim_ngd_disable_stream(struct slim_stream_runtime *rt)
+{
+	struct slim_device *sdev = rt->dev;
+	struct slim_controller *ctrl = sdev->ctrl;
+	struct slim_val_inf msg = {0};
+	u8 wbuf[SLIM_MSGQ_BUF_LEN];
+	u8 rbuf[SLIM_MSGQ_BUF_LEN];
+	struct slim_msg_txn txn = {0,};
+	int i, ret;
+
+	if (!rt->num_ports)
+		return 0;
+
+	txn.mt = SLIM_MSG_MT_DEST_REFERRED_USER;
+	txn.dt = SLIM_MSG_DEST_LOGICALADDR;
+	txn.la = SLIM_LA_MGR;
+	txn.ec = 0;
+	txn.msg = &msg;
+	txn.msg->num_bytes = 0;
+	txn.msg->wbuf = wbuf;
+	txn.msg->rbuf = rbuf;
+
+	wbuf[txn.msg->num_bytes++] = (SLIM_CH_REMOVE << 6) |
+				     (sdev->laddr & 0x1f);
+	ret = slim_alloc_txn_tid(ctrl, &txn);
+	if (ret) {
+		dev_err(&sdev->dev, "Fail to allocate TID\n");
+		return ret;
+	}
+	wbuf[txn.msg->num_bytes++] = txn.tid;
+
+	for (i = 0; i < rt->num_ports; i++)
+		wbuf[txn.msg->num_bytes++] = rt->ports[i].ch.id;
+
+	txn.mc = SLIM_USR_MC_CHAN_CTRL;
+	txn.rl = txn.msg->num_bytes + 4;
+	ret = qcom_slim_ngd_xfer_msg_sync(ctrl, &txn);
+	if (ret) {
+		slim_free_txn_tid(ctrl, &txn);
+		/*
+		 * A remote error means the manager has already dropped the
+		 * channel, which is the state being asked for.
+		 */
+		if (ret == -EREMOTEIO)
+			return 0;
+		dev_err(&sdev->dev, "TX timed out:MC:0x%x,mt:0x%x", txn.mc,
+			txn.mt);
+		return ret;
+	}
+
+	txn.mc = SLIM_USR_MC_RECONFIG_NOW;
+	txn.msg->num_bytes = 2;
+	wbuf[1] = sdev->laddr;
+	txn.rl = txn.msg->num_bytes + 4;
+
+	ret = slim_alloc_txn_tid(ctrl, &txn);
+	if (ret) {
+		dev_err(ctrl->dev, "Fail to allocate TID\n");
+		return ret;
+	}
+
+	wbuf[0] = txn.tid;
+	ret = qcom_slim_ngd_xfer_msg_sync(ctrl, &txn);
+	if (ret) {
+		slim_free_txn_tid(ctrl, &txn);
+		dev_err(&sdev->dev, "TX timed out:MC:0x%x,mt:0x%x", txn.mc,
+			txn.mt);
+	}
+
+	for (i = 0; i < rt->num_ports; i++)
+		rt->ports[i].ch.state = SLIM_CH_STATE_REMOVED;
+
+	return ret;
+}
+
 static int qcom_slim_ngd_get_laddr(struct slim_controller *ctrl,
 				   struct slim_eaddr *ea, u8 *laddr)
 {
@@ -1673,6 +1766,7 @@ static int qcom_slim_ngd_ctrl_probe(struct platform_device *pdev)
 	ctrl->ctrl.clkgear = SLIM_MAX_CLK_GEAR;
 	ctrl->ctrl.get_laddr = qcom_slim_ngd_get_laddr;
 	ctrl->ctrl.enable_stream = qcom_slim_ngd_enable_stream;
+	ctrl->ctrl.disable_stream = qcom_slim_ngd_disable_stream;
 	ctrl->ctrl.xfer_msg = qcom_slim_ngd_xfer_msg;
 	ctrl->ctrl.wakeup = NULL;
 	ctrl->state = QCOM_SLIM_NGD_CTRL_DOWN;
