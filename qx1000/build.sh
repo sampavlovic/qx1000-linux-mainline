@@ -8,7 +8,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 O=$PWD/out
 mkdir -p "$O"
-export ARCH=arm64
+export ARCH=arm64 LOCALVERSION=	# empty LOCALVERSION: no "+" for a git tree
 [ "$(uname -m)" = aarch64 ] || export CROSS_COMPILE="${CROSS_COMPILE:-aarch64-linux-gnu-}"
 
 # arm64 defconfig, Qualcomm platforms only, plus the Pro1 fragment
