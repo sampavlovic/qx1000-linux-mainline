@@ -25,6 +25,8 @@
 #include <linux/regulator/consumer.h>
 #include <linux/slab.h>
 #include <linux/usb/tcpm.h>
+#include <linux/devm-helpers.h>
+#include <linux/workqueue.h>
 
 #include "qcom_pmic_typec.h"
 #include "qcom_pmic_typec_port.h"
@@ -85,6 +87,10 @@ struct pmic_typec_port {
 	struct regulator	*vbus;		/* NULL: cannot source VBUS */
 	bool			vbus_enabled;
 	struct mutex		vbus_lock;	/* VBUS state serialization */
+
+	/* VBUS edges raise no Type-C interrupt: poll USBIN plug-in */
+	struct delayed_work	vbus_poll;
+	bool			vbus_seen;
 };
 
 static struct pmic_typec_port *to_port(struct tcpc_dev *tcpc)
@@ -128,6 +134,31 @@ static irqreturn_t pmi8998_typec_isr(int irq, void *dev_id)
 	tcpm_vbus_change(port->tcpm_port);
 
 	return IRQ_HANDLED;
+}
+
+/*
+ * "type-c-change" fires for CC changes but not for VBUS: after TCPM's port
+ * reset the source re-applies VBUS and TCPM never hears of it, so it stays
+ * in SNK_DEBOUNCED. Report USBIN plug-in changes from a cheap poll.
+ */
+#define PMI8998_VBUS_POLL_MS	100
+
+static void pmi8998_typec_vbus_poll(struct work_struct *work)
+{
+	struct pmic_typec_port *port = container_of(to_delayed_work(work),
+						    struct pmic_typec_port, vbus_poll);
+	unsigned int stat;
+	bool on;
+
+	if (!port_read(port, USBIN_INT_RT_STS_REG, &stat)) {
+		on = stat & USBIN_PLUGIN_RT_STS_BIT;
+		if (on != port->vbus_seen) {
+			port->vbus_seen = on;
+			if (port->tcpm_port)
+				tcpm_vbus_change(port->tcpm_port);
+		}
+	}
+	schedule_delayed_work(&port->vbus_poll, msecs_to_jiffies(PMI8998_VBUS_POLL_MS));
 }
 
 static int pmi8998_typec_get_vbus(struct tcpc_dev *tcpc)
@@ -432,6 +463,12 @@ int qcom_pmic_typec_port_pmi8998_probe(struct platform_device *pdev,
 	port->irq = platform_get_irq_byname(pdev, "type-c-change");
 	if (port->irq < 0)
 		return port->irq;
+
+	ret = devm_delayed_work_autocancel(dev, &port->vbus_poll,
+					  pmi8998_typec_vbus_poll);
+	if (ret)
+		return ret;
+	schedule_delayed_work(&port->vbus_poll, msecs_to_jiffies(PMI8998_VBUS_POLL_MS));
 
 	ret = devm_request_threaded_irq(dev, port->irq, NULL, pmi8998_typec_isr,
 					IRQF_ONESHOT | IRQF_NO_AUTOEN,
