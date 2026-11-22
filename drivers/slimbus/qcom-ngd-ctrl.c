@@ -169,6 +169,8 @@ struct qcom_slim_ngd_ctrl {
 	void *notifier;
 	struct pdr_handle *pdr;
 	enum qcom_slim_ngd_state state;
+	/* set only while the SSR notifier tears the children down under tx_lock */
+	bool ssr_teardown;
 	dma_addr_t rx_phys_base;
 	dma_addr_t tx_phys_base;
 	void *rx_base;
@@ -797,6 +799,30 @@ static int qcom_slim_ngd_xfer_msg(struct slim_controller *sctrl,
 	u8 *puc;
 	u8 la = txn->la;
 	bool usr_msg = false;
+
+	/*
+	 * Refuse transfers issued from inside the SSR teardown, before touching
+	 * tx_lock.
+	 *
+	 * qcom_slim_ngd_ssr_pdr_notify() takes tx_lock and, still holding it,
+	 * calls qcom_slim_ngd_down() -> slim_report_absent() for every child.
+	 * A codec driver removing its own children from there makes their
+	 * free_irq() flush the interrupt masks back out over SLIMbus, i.e.
+	 * straight back into this function. Taking tx_lock again from the
+	 * thread that already holds it deadlocks the teardown for good, and
+	 * hung-task detection then takes the machine down some 30 seconds
+	 * later. The bus is gone by that point, so failing fast costs nothing.
+	 *
+	 * This is keyed on the teardown flag rather than on the DOWN state
+	 * because the state is also DOWN for the whole of bring-up, where
+	 * refusing transfers would break enumeration.
+	 */
+	if (ctrl->ssr_teardown) {
+		dev_err_ratelimited(ctrl->dev,
+				    "SSR teardown, refusing xfer mc:0x%x mt:0x%x\n",
+				    txn->mc, txn->mt);
+		return -ENOTCONN;
+	}
 
 	if (txn->mt == SLIM_MSG_MT_CORE &&
 		(txn->mc >= SLIM_MSG_MC_BEGIN_RECONFIGURATION &&
@@ -1489,8 +1515,15 @@ static int qcom_slim_ngd_ssr_pdr_notify(struct qcom_slim_ngd_ctrl *ctrl,
 		if (ctrl->state != QCOM_SLIM_NGD_CTRL_DOWN) {
 			pm_runtime_get_noresume(ctrl->ctrl.dev);
 			ctrl->state = QCOM_SLIM_NGD_CTRL_DOWN;
+			/*
+			 * Everything up to the reset below runs with tx_lock
+			 * held and can re-enter xfer_msg through the children's
+			 * teardown; see the comment there.
+			 */
+			ctrl->ssr_teardown = true;
 			qcom_slim_ngd_down(ctrl);
 			qcom_slim_ngd_exit_dma(ctrl);
+			ctrl->ssr_teardown = false;
 		}
 		break;
 	case QCOM_SSR_AFTER_POWERUP:
