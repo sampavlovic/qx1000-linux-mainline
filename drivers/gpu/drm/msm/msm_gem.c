@@ -53,6 +53,7 @@ static void put_iova_spaces(struct drm_gem_object *obj, struct drm_gpuvm *vm,
 static void msm_gem_close(struct drm_gem_object *obj, struct drm_file *file)
 {
 	struct msm_context *ctx = file->driver_priv;
+	struct msm_drm_private *priv = obj->dev->dev_private;
 	struct drm_exec exec;
 
 	update_ctx_mem(file, -obj->size);
@@ -72,6 +73,16 @@ static void msm_gem_close(struct drm_gem_object *obj, struct drm_file *file)
 	 * is closed (see msm_gem_vm_close())
 	 */
 	if (msm_context_is_vmbind(ctx))
+		return;
+
+	/*
+	 * Without per-process pgtables (a5xx and older) every context shares
+	 * gpu->vm, and a dma-buf importer such as the compositor maps the very
+	 * same VMA. Tearing it down when one process closes its handle unmaps
+	 * the buffer under the importer: GPU translation faults and hangs.
+	 * Leave shared-VM mappings to msm_gem_free_object().
+	 */
+	if (priv->gpu && ctx->vm == priv->gpu->vm)
 		return;
 
 	/*
