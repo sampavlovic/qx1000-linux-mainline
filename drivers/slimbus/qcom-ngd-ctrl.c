@@ -1814,6 +1814,15 @@ static int qcom_slim_ngd_ctrl_probe(struct platform_device *pdev)
 
 	enable_irq(irq);
 
+	/*
+	 * The SSR notifier does not replay a DSP that booted before it was
+	 * registered, and PDR has no audio_pd to report on MSM8998, so when the
+	 * ADSP wins the race nothing ever enables the controller. The QMI lookup
+	 * does replay an existing server: try once now. The worker waits for QMI
+	 * and a later SSR event retries; a second enable is a no-op.
+	 */
+	schedule_work(&ctrl->ngd_up_work);
+
 	return 0;
 
 err_unregister_ngd:
