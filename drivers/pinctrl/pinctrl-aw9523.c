@@ -62,6 +62,7 @@
 struct aw9523_irq {
 	struct mutex lock;
 	u16 cached_gpio;
+	u16 masked;
 };
 
 /*
@@ -425,10 +426,8 @@ static void aw9523_irq_mask(struct irq_data *d)
 {
 	struct aw9523 *awi = gpiochip_get_data(irq_data_get_irq_chip_data(d));
 	irq_hw_number_t hwirq = irqd_to_hwirq(d);
-	unsigned int n = hwirq % AW9523_PINS_PER_PORT;
 
-	regmap_update_bits(awi->regmap, AW9523_REG_INTR_DIS(hwirq),
-			   BIT(n), BIT(n));
+	awi->irq->masked |= BIT(hwirq);
 	gpiochip_disable_irq(&awi->gpio, hwirq);
 }
 
@@ -443,11 +442,9 @@ static void aw9523_irq_unmask(struct irq_data *d)
 {
 	struct aw9523 *awi = gpiochip_get_data(irq_data_get_irq_chip_data(d));
 	irq_hw_number_t hwirq = irqd_to_hwirq(d);
-	unsigned int n = hwirq % AW9523_PINS_PER_PORT;
 
 	gpiochip_enable_irq(&awi->gpio, hwirq);
-	regmap_update_bits(awi->regmap, AW9523_REG_INTR_DIS(hwirq),
-			   BIT(n), 0);
+	awi->irq->masked &= ~BIT(hwirq);
 }
 
 static irqreturn_t aw9523_irq_thread_func(int irq, void *dev_id)
@@ -457,15 +454,20 @@ static irqreturn_t aw9523_irq_thread_func(int irq, void *dev_id)
 	unsigned long changed_gpio;
 	unsigned int tmp, port_pin, i, ret;
 
+	/* Reading the input state is what releases INTN */
+	mutex_lock(&awi->i2c_lock);
 	for (i = 0; i < AW9523_NUM_PORTS; i++) {
 		port_pin = i * AW9523_PINS_PER_PORT;
 		ret = regmap_read(awi->regmap,
 				  AW9523_REG_IN_STATE(port_pin),
 				  &tmp);
-		if (ret)
-			return ret;
+		if (ret) {
+			mutex_unlock(&awi->i2c_lock);
+			return IRQ_NONE;
+		}
 		val |= (u8)tmp << (i * 8);
 	}
+	mutex_unlock(&awi->i2c_lock);
 
 	/* Handle GPIO input release interrupt as well */
 	changed_gpio = awi->irq->cached_gpio ^ val;
@@ -496,7 +498,6 @@ static void aw9523_irq_bus_lock(struct irq_data *d)
 	struct aw9523 *awi = gpiochip_get_data(irq_data_get_irq_chip_data(d));
 
 	mutex_lock(&awi->irq->lock);
-	regcache_cache_only(awi->regmap, true);
 }
 
 /*
@@ -510,8 +511,11 @@ static void aw9523_irq_bus_sync_unlock(struct irq_data *d)
 {
 	struct aw9523 *awi = gpiochip_get_data(irq_data_get_irq_chip_data(d));
 
-	regcache_cache_only(awi->regmap, false);
-	regcache_sync(awi->regmap);
+	mutex_lock(&awi->i2c_lock);
+	regmap_write(awi->regmap, AW9523_REG_INTR_DIS(0), awi->irq->masked & 0xff);
+	regmap_write(awi->regmap, AW9523_REG_INTR_DIS(AW9523_PINS_PER_PORT),
+		     awi->irq->masked >> 8);
+	mutex_unlock(&awi->i2c_lock);
 	mutex_unlock(&awi->irq->lock);
 }
 
@@ -813,6 +817,7 @@ static int aw9523_init_irq(struct aw9523 *awi, int irq)
 		return -ENOMEM;
 
 	mutex_init(&awi->irq->lock);
+	awi->irq->masked = U16_MAX;	/* as aw9523_hw_init() leaves INTR_DIS */
 
 	ret = devm_request_threaded_irq(dev, irq, NULL, aw9523_irq_thread_func,
 					IRQF_ONESHOT, dev_name(dev), awi);
