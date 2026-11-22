@@ -579,6 +579,10 @@
 /* ports range from 10-16 */
 #define WCD934X_SLIM_PGD_TX_PORT_MULTI_CHNL_1(p)		(0x101 + 4 * p)
 #define WCD934X_SLIM_PGD_RX_PORT_MULTI_CHNL_0(p)		(0x140 + 4 * p)
+/* Per-TX-port hardware over/underflow auto-recovery */
+#define WCD934X_SLIM_PGD_TX_PORT_OR_UR_CFG(p)			(0x1f0 + (p))
+#define WCD934X_SLIM_TX_UNDERFLOW_RECOVERY_EN			BIT(0)
+#define WCD934X_SLIM_TX_OVERFLOW_RECOVERY_EN			BIT(1)
 
 #define SLIM_MANF_ID_QCOM			0x217
 #define SLIM_PROD_CODE_WCD9340			0x250

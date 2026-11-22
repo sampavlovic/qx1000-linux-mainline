@@ -1685,6 +1685,76 @@ static int wcd934x_set_decimator_rate(struct snd_soc_dai *dai,
 	return 0;
 }
 
+/*
+ * Program the slave port the way the bus manager expects it, in the order the
+ * hardware needs: the over/underflow auto-recovery configuration and the
+ * multi-channel grouping payload first, then the watermark and the enable bit
+ * last, because that is the write which opens the port's FIFO.
+ *
+ * This runs from trigger(), immediately before the channel is prepared and
+ * activated. It must not run from hw_params(): the FIFO is 12 bytes, six
+ * samples or 125 us at 48 kHz/16-bit, and there is no active channel to drain
+ * it with until the stream starts - measured on a Pixel 2 XL, some 250 ms
+ * later.
+ */
+static int wcd934x_slim_port_cfg(struct wcd934x_codec *wcd,
+				 struct wcd_slim_codec_dai_data *dai_data,
+				 int direction)
+{
+	struct wcd934x_slim_ch *ch;
+	u16 payload = 0;
+	int ret;
+
+	list_for_each_entry(ch, &dai_data->slim_ch_list, list)
+		payload |= 1 << ch->shift;
+
+	list_for_each_entry(ch, &dai_data->slim_ch_list, list) {
+		if (direction == SNDRV_PCM_STREAM_PLAYBACK) {
+			ret = regmap_write(wcd->if_regmap,
+					   WCD934X_SLIM_PGD_RX_PORT_MULTI_CHNL_0(ch->port),
+					   payload);
+			if (ret < 0)
+				return ret;
+
+			ret = regmap_write(wcd->if_regmap,
+					   WCD934X_SLIM_PGD_RX_PORT_CFG(ch->port),
+					   WCD934X_SLIM_WATER_MARK_VAL);
+			if (ret < 0)
+				return ret;
+
+			continue;
+		}
+
+		ret = regmap_write(wcd->if_regmap,
+				   WCD934X_SLIM_PGD_TX_PORT_OR_UR_CFG(ch->port),
+				   WCD934X_SLIM_TX_UNDERFLOW_RECOVERY_EN |
+				   WCD934X_SLIM_TX_OVERFLOW_RECOVERY_EN);
+		if (ret < 0)
+			return ret;
+
+		ret = regmap_write(wcd->if_regmap,
+				   WCD934X_SLIM_PGD_TX_PORT_MULTI_CHNL_0(ch->port),
+				   payload & 0x00ff);
+		if (ret < 0)
+			return ret;
+
+		/* ports 8,9 */
+		ret = regmap_write(wcd->if_regmap,
+				   WCD934X_SLIM_PGD_TX_PORT_MULTI_CHNL_1(ch->port),
+				   (payload & 0xff00) >> 8);
+		if (ret < 0)
+			return ret;
+
+		ret = regmap_write(wcd->if_regmap,
+				   WCD934X_SLIM_PGD_TX_PORT_CFG(ch->port),
+				   WCD934X_SLIM_WATER_MARK_VAL);
+		if (ret < 0)
+			return ret;
+	}
+
+	return 0;
+}
+
 static int wcd934x_slim_set_hw_params(struct wcd934x_codec *wcd,
 				      struct wcd_slim_codec_dai_data *dai_data,
 				      int direction)
@@ -1692,17 +1762,14 @@ static int wcd934x_slim_set_hw_params(struct wcd934x_codec *wcd,
 	struct list_head *slim_ch_list = &dai_data->slim_ch_list;
 	struct slim_stream_config *cfg = &dai_data->sconfig;
 	struct wcd934x_slim_ch *ch;
-	u16 payload = 0;
-	int ret, i;
+	int i;
 
 	cfg->ch_count = 0;
 	cfg->direction = direction;
 	cfg->port_mask = 0;
 
-	/* Configure slave interface device */
 	list_for_each_entry(ch, slim_ch_list, list) {
 		cfg->ch_count++;
-		payload |= 1 << ch->shift;
 		cfg->port_mask |= BIT(ch->port);
 	}
 
@@ -1711,57 +1778,12 @@ static int wcd934x_slim_set_hw_params(struct wcd934x_codec *wcd,
 		return -ENOMEM;
 
 	i = 0;
-	list_for_each_entry(ch, slim_ch_list, list) {
+	list_for_each_entry(ch, slim_ch_list, list)
 		cfg->chs[i++] = ch->ch_num;
-		if (direction == SNDRV_PCM_STREAM_PLAYBACK) {
-			/* write to interface device */
-			ret = regmap_write(wcd->if_regmap,
-			   WCD934X_SLIM_PGD_RX_PORT_MULTI_CHNL_0(ch->port),
-			   payload);
-
-			if (ret < 0)
-				goto err;
-
-			/* configure the slave port for water mark and enable*/
-			ret = regmap_write(wcd->if_regmap,
-					WCD934X_SLIM_PGD_RX_PORT_CFG(ch->port),
-					WCD934X_SLIM_WATER_MARK_VAL);
-			if (ret < 0)
-				goto err;
-		} else {
-			ret = regmap_write(wcd->if_regmap,
-				WCD934X_SLIM_PGD_TX_PORT_MULTI_CHNL_0(ch->port),
-				payload & 0x00FF);
-			if (ret < 0)
-				goto err;
-
-			/* ports 8,9 */
-			ret = regmap_write(wcd->if_regmap,
-				WCD934X_SLIM_PGD_TX_PORT_MULTI_CHNL_1(ch->port),
-				(payload & 0xFF00) >> 8);
-			if (ret < 0)
-				goto err;
-
-			/* configure the slave port for water mark and enable*/
-			ret = regmap_write(wcd->if_regmap,
-					WCD934X_SLIM_PGD_TX_PORT_CFG(ch->port),
-					WCD934X_SLIM_WATER_MARK_VAL);
-
-			if (ret < 0)
-				goto err;
-		}
-	}
 
 	dai_data->sruntime = slim_stream_allocate(wcd->sdev, "WCD934x-SLIM");
 
 	return 0;
-
-err:
-	dev_err(wcd->dev, "Error Setting slim hw params\n");
-	kfree(cfg->chs);
-	cfg->chs = NULL;
-
-	return ret;
 }
 
 static int wcd934x_hw_params(struct snd_pcm_substream *substream,
@@ -1870,6 +1892,7 @@ static int wcd934x_trigger(struct snd_pcm_substream *substream, int cmd,
 	struct wcd_slim_codec_dai_data *dai_data;
 	struct wcd934x_codec *wcd;
 	struct slim_stream_config *cfg;
+	int ret;
 
 	wcd = snd_soc_component_get_drvdata(dai->component);
 
@@ -1880,6 +1903,12 @@ static int wcd934x_trigger(struct snd_pcm_substream *substream, int cmd,
 	case SNDRV_PCM_TRIGGER_RESUME:
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
 		cfg = &dai_data->sconfig;
+		ret = wcd934x_slim_port_cfg(wcd, dai_data, cfg->direction);
+		if (ret < 0) {
+			dev_err(wcd->dev, "Error configuring slave port: %d\n",
+				ret);
+			return ret;
+		}
 		slim_stream_prepare(dai_data->sruntime, cfg);
 		slim_stream_enable(dai_data->sruntime);
 		break;
