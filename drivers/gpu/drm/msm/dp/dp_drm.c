@@ -305,6 +305,13 @@ int msm_dp_bridge_init(struct msm_dp *msm_dp_display, struct drm_device *dev,
 
 	bridge = &msm_dp_bridge->bridge;
 	bridge->type = msm_dp_display->connector_type;
+	/*
+	 * The bridge connector takes its fwnode from the last bridge's of_node;
+	 * a USB-C DisplayPort alt mode driver reports HPD out of band against
+	 * the controller node (connector "displayport" phandle), so the
+	 * connector must carry it or the HPD never arrives.
+	 */
+	bridge->of_node = msm_dp_display->pdev->dev.of_node;
 	bridge->ycbcr_420_allowed = yuv_supported;
 
 	/*
