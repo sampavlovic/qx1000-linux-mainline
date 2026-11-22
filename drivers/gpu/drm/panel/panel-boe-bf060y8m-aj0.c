@@ -15,6 +15,7 @@
 #include <video/mipi_display.h>
 #include <drm/drm_mipi_dsi.h>
 #include <drm/drm_modes.h>
+#include <drm/drm_of.h>
 #include <drm/drm_panel.h>
 
 #define DCS_ALLOW_HBM_RANGE		0x0c
@@ -34,6 +35,7 @@ struct boe_bf060y8m_aj0 {
 	struct mipi_dsi_device *dsi;
 	struct regulator_bulk_data vregs[BF060Y8M_VREG_MAX];
 	struct gpio_desc *reset_gpio;
+	enum drm_panel_orientation orientation;
 };
 
 static inline
@@ -200,10 +202,19 @@ static int boe_bf060y8m_aj0_get_modes(struct drm_panel *panel,
 	return 1;
 }
 
+static enum drm_panel_orientation
+boe_bf060y8m_aj0_get_orientation(struct drm_panel *panel)
+{
+	struct boe_bf060y8m_aj0 *boe = to_boe_bf060y8m_aj0(panel);
+
+	return boe->orientation;
+}
+
 static const struct drm_panel_funcs boe_bf060y8m_aj0_panel_funcs = {
 	.prepare = boe_bf060y8m_aj0_prepare,
 	.unprepare = boe_bf060y8m_aj0_unprepare,
 	.get_modes = boe_bf060y8m_aj0_get_modes,
+	.get_orientation = boe_bf060y8m_aj0_get_orientation,
 };
 
 static int boe_bf060y8m_aj0_bl_update_status(struct backlight_device *bl)
@@ -339,6 +350,10 @@ static int boe_bf060y8m_aj0_probe(struct mipi_dsi_device *dsi)
 	if (IS_ERR(boe->reset_gpio))
 		return dev_err_probe(dev, PTR_ERR(boe->reset_gpio),
 				     "Failed to get reset-gpios\n");
+
+	ret = drm_of_get_panel_orientation(dev->of_node, &boe->orientation);
+	if (ret)
+		return dev_err_probe(dev, ret, "Failed to get orientation\n");
 
 	boe->dsi = dsi;
 	mipi_dsi_set_drvdata(dsi, boe);
