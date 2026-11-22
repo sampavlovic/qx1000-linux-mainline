@@ -1929,8 +1929,20 @@ static int wcd934x_trigger(struct snd_pcm_substream *substream, int cmd,
 				ret);
 			return ret;
 		}
-		slim_stream_prepare(dai_data->sruntime, cfg);
-		slim_stream_enable(dai_data->sruntime);
+		ret = slim_stream_prepare(dai_data->sruntime, cfg);
+		if (ret) {
+			dev_err(wcd->dev, "Error preparing SLIM stream: %d\n",
+				ret);
+			return ret;
+		}
+
+		ret = slim_stream_enable(dai_data->sruntime);
+		if (ret) {
+			dev_err(wcd->dev, "Error enabling SLIM stream: %d\n",
+				ret);
+			slim_stream_unprepare(dai_data->sruntime);
+			return ret;
+		}
 		break;
 	case SNDRV_PCM_TRIGGER_STOP:
 	case SNDRV_PCM_TRIGGER_SUSPEND:
