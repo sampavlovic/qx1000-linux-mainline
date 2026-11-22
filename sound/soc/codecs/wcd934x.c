@@ -6041,6 +6041,10 @@ static int wcd934x_codec_probe(struct platform_device *pdev)
 	wcd->common.dev = dev->parent;
 	wcd->common.max_bias = 4;
 
+	ret = wcd_dt_parse_micbias_info(&wcd->common);
+	if (ret)
+		return ret;
+
 	ret = wcd934x_codec_parse_data(wcd);
 	if (ret)
 		return ret;
