@@ -2243,16 +2243,108 @@ static int wcd934x_init_dmic(struct snd_soc_component *comp)
 	return 0;
 }
 
+struct wcd934x_reg_mask_val {
+	u16 reg;
+	u8 mask;
+	u8 val;
+};
+
+/*
+ * Reset defaults the part does not come up with. Only three of these were
+ * applied before, leaving the rest of the digital top, the TX paths and the
+ * clock gating at values the analog and SLIMbus front ends do not work with.
+ */
+static const struct wcd934x_reg_mask_val wcd934x_reg_defaults[] = {
+	{ WCD934X_BIAS_VBG_FINE_ADJ, 0xff, 0x75 },
+	{ WCD934X_CODEC_CPR_SVS_CX_VDD, 0xff, 0x7c },	/* value in svs mode */
+	{ WCD934X_CODEC_CPR_SVS2_CX_VDD, 0xff, 0x58 },	/* value in svs2 mode */
+	{ WCD934X_CDC_RX0_RX_PATH_DSMDEM_CTL, 0x01, 0x01 },
+	{ WCD934X_CDC_RX1_RX_PATH_DSMDEM_CTL, 0x01, 0x01 },
+	{ WCD934X_CDC_RX2_RX_PATH_DSMDEM_CTL, 0x01, 0x01 },
+	{ WCD934X_CDC_RX3_RX_PATH_DSMDEM_CTL, 0x01, 0x01 },
+	{ WCD934X_CDC_RX4_RX_PATH_DSMDEM_CTL, 0x01, 0x01 },
+	{ WCD934X_CDC_RX7_RX_PATH_DSMDEM_CTL, 0x01, 0x01 },
+	{ WCD934X_CDC_RX8_RX_PATH_DSMDEM_CTL, 0x01, 0x01 },
+	{ WCD934X_CDC_COMPANDER8_CTL7, 0x1e, 0x18 },
+	{ WCD934X_CDC_COMPANDER7_CTL7, 0x1e, 0x18 },
+	{ WCD934X_CDC_RX0_RX_PATH_SEC0, 0x08, 0x00 },
+	{ WCD934X_CDC_CLSH_DECAY_CTRL, 0x03, 0x00 },
+	{ WCD934X_MICB1_TEST_CTL_2, 0x07, 0x01 },
+	{ WCD934X_CDC_BOOST0_BOOST_CFG1, 0x3f, 0x12 },
+	{ WCD934X_CDC_BOOST0_BOOST_CFG2, 0x1c, 0x08 },
+	{ WCD934X_CDC_BOOST1_BOOST_CFG1, 0x3f, 0x12 },
+	{ WCD934X_CDC_BOOST1_BOOST_CFG2, 0x1c, 0x08 },
+	{ WCD934X_CPE_SS_CPARMAD_BUFRDY_INT_PERIOD, 0x1f, 0x09 },
+	{ WCD934X_CDC_TX0_TX_PATH_CFG1, 0x01, 0x00 },
+	{ WCD934X_CDC_TX1_TX_PATH_CFG1, 0x01, 0x00 },
+	{ WCD934X_CDC_TX2_TX_PATH_CFG1, 0x01, 0x00 },
+	{ WCD934X_CDC_TX3_TX_PATH_CFG1, 0x01, 0x00 },
+	{ WCD934X_CDC_TX4_TX_PATH_CFG1, 0x01, 0x00 },
+	{ WCD934X_CDC_TX5_TX_PATH_CFG1, 0x01, 0x00 },
+	{ WCD934X_CDC_TX6_TX_PATH_CFG1, 0x01, 0x00 },
+	{ WCD934X_CDC_TX7_TX_PATH_CFG1, 0x01, 0x00 },
+	{ WCD934X_CDC_TX8_TX_PATH_CFG1, 0x01, 0x00 },
+	{ WCD934X_RX_OCP_CTL, 0x0f, 0x02 },	/* OCP number of attempts is 2 */
+	{ WCD934X_HPH_OCP_CTL, 0xff, 0x3a },	/* OCP current limit */
+	{ WCD934X_HPH_L_TEST, 0x01, 0x01 },
+	{ WCD934X_HPH_R_TEST, 0x01, 0x01 },
+	{ WCD934X_CPE_FLL_CONFIG_CTL_2, 0xff, 0x20 },
+};
+
+static const struct wcd934x_reg_mask_val wcd934x_reg_init[] = {
+	{ WCD934X_CDC_CLSH_K2_MSB, 0x0f, 0x00 },
+	{ WCD934X_CDC_CLSH_K2_LSB, 0xff, 0x60 },
+	{ WCD934X_CPE_SS_DMIC_CFG, 0x80, 0x00 },  /* take DMICs out of reset */
+	{ WCD934X_CDC_BOOST0_BOOST_CTL, 0x70, 0x50 },
+	{ WCD934X_CDC_BOOST1_BOOST_CTL, 0x70, 0x50 },
+	/* set SPKR rate to FS_2P4_3P072 */
+	{ WCD934X_CDC_RX7_RX_PATH_CFG1, 0x08, 0x08 },
+	{ WCD934X_CDC_RX8_RX_PATH_CFG1, 0x08, 0x08 },
+	{ WCD934X_CDC_TOP_TOP_CFG1, 0x02, 0x02 },
+	{ WCD934X_CDC_TOP_TOP_CFG1, 0x01, 0x01 },
+	{ WCD934X_CDC_TX9_SPKR_PROT_PATH_CFG0, 0x01, 0x01 },
+	{ WCD934X_CDC_TX10_SPKR_PROT_PATH_CFG0, 0x01, 0x01 },
+	{ WCD934X_CDC_TX11_SPKR_PROT_PATH_CFG0, 0x01, 0x01 },
+	{ WCD934X_CDC_TX12_SPKR_PROT_PATH_CFG0, 0x01, 0x01 },
+	{ WCD934X_DATA_HUB_SB_TX11_INP_CFG, 0x01, 0x01 },
+	{ WCD934X_CDC_CLK_RST_CTRL_FS_CNT_CONTROL, 0x01, 0x01 },
+	{ WCD934X_CDC_COMPANDER7_CTL3, 0x80, 0x80 },
+	{ WCD934X_CDC_COMPANDER8_CTL3, 0x80, 0x80 },
+	{ WCD934X_CDC_COMPANDER7_CTL7, 0x01, 0x01 },
+	{ WCD934X_CDC_COMPANDER8_CTL7, 0x01, 0x01 },
+	{ WCD934X_CODEC_RPM_CLK_GATE, 0x08, 0x00 },
+	{ WCD934X_TLMM_DMIC3_CLK_PINCFG, 0xff, 0x0a },
+	{ WCD934X_TLMM_DMIC3_DATA_PINCFG, 0xff, 0x0a },
+	{ WCD934X_CPE_SS_SVA_CFG, 0x60, 0x00 },
+	{ WCD934X_CPE_SS_CPAR_CFG, 0x10, 0x10 },
+};
+
+/* Errata workarounds that only apply to the 1.1 revision of the silicon. */
+static const struct wcd934x_reg_mask_val wcd934x_reg_init_1_1[] = {
+	{ WCD934X_CDC_COMPANDER1_CTL7, 0x1e, 0x06 },
+	{ WCD934X_CDC_COMPANDER2_CTL7, 0x1e, 0x06 },
+	{ WCD934X_HPH_NEW_INT_RDAC_HD2_CTL_L, 0xff, 0x84 },
+	{ WCD934X_HPH_NEW_INT_RDAC_HD2_CTL_R, 0xff, 0x84 },
+	{ WCD934X_CDC_RX3_RX_PATH_SEC0, 0xfc, 0xf4 },
+	{ WCD934X_CDC_RX4_RX_PATH_SEC0, 0xfc, 0xf4 },
+};
+
+static void wcd934x_apply_reg_table(struct regmap *rm,
+				    const struct wcd934x_reg_mask_val *tbl,
+				    size_t num)
+{
+	size_t i;
+
+	for (i = 0; i < num; i++)
+		regmap_update_bits(rm, tbl[i].reg, tbl[i].mask, tbl[i].val);
+}
+
 static void wcd934x_hw_init(struct wcd934x_codec *wcd)
 {
-	struct regmap *rm = wcd->regmap;
-
-	/* set SPKR rate to FS_2P4_3P072 */
-	regmap_update_bits(rm, WCD934X_CDC_RX7_RX_PATH_CFG1, 0x08, 0x08);
-	regmap_update_bits(rm, WCD934X_CDC_RX8_RX_PATH_CFG1, 0x08, 0x08);
-
-	/* Take DMICs out of reset */
-	regmap_update_bits(rm, WCD934X_CPE_SS_DMIC_CFG, 0x80, 0x00);
+	wcd934x_apply_reg_table(wcd->regmap, wcd934x_reg_defaults,
+				ARRAY_SIZE(wcd934x_reg_defaults));
+	wcd934x_apply_reg_table(wcd->regmap, wcd934x_reg_init,
+				ARRAY_SIZE(wcd934x_reg_init));
 }
 
 static int wcd934x_comp_init(struct snd_soc_component *component)
@@ -2262,6 +2354,12 @@ static int wcd934x_comp_init(struct snd_soc_component *component)
 	wcd934x_hw_init(wcd);
 	wcd934x_enable_efuse_sensing(wcd);
 	wcd934x_get_version(wcd);
+
+	/* The 1.1 errata table can only be applied once the version is known. */
+	if (wcd->version == WCD_VERSION_WCD9340_1_1 ||
+	    wcd->version == WCD_VERSION_WCD9341_1_1)
+		wcd934x_apply_reg_table(wcd->regmap, wcd934x_reg_init_1_1,
+					ARRAY_SIZE(wcd934x_reg_init_1_1));
 
 	return 0;
 }
