@@ -206,7 +206,7 @@ int slim_stream_prepare(struct slim_stream_runtime *rt,
 {
 	struct slim_controller *ctrl = rt->dev->ctrl;
 	struct slim_port *port;
-	int num_ports, i, port_id, prrate;
+	int num_ports, i, port_id, prrate, ret;
 
 	if (rt->ports) {
 		dev_err(&rt->dev->dev, "Stream already Prepared\n");
@@ -263,7 +263,18 @@ int slim_stream_prepare(struct slim_stream_runtime *rt,
 		else
 			port->direction = SLIM_PORT_SOURCE;
 
-		slim_connect_port_channel(rt, port);
+		ret = slim_connect_port_channel(rt, port);
+		if (ret) {
+			dev_err(&rt->dev->dev,
+				"Failed to connect port %d to channel %d: %d\n",
+				port->id, port->ch.id, ret);
+			while (i--)
+				slim_disconnect_port(rt, &rt->ports[i]);
+			kfree(rt->ports);
+			rt->ports = NULL;
+			rt->num_ports = 0;
+			return ret;
+		}
 		i++;
 	}
 
