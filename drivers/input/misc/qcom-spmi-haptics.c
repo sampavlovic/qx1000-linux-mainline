@@ -532,7 +532,7 @@ static int spmi_haptics_init(struct spmi_haptics *haptics)
 	 * This is greatly simplified.
 	 */
 	val = FIELD_PREP(LRA_RES_CAL_MASK, ilog2(32 / HAP_RES_CAL_PERIOD_MIN)) |
-	      FIELD_PREP(LRA_AUTO_RES_MODE_MASK, HAP_AUTO_RES_ZXD_EOP) |
+	      FIELD_PREP(LRA_AUTO_RES_MODE_MASK, HAP_AUTO_RES_QWD) |
 	      FIELD_PREP(LRA_HIGH_Z_MASK, 1);
 
 	mask = LRA_AUTO_RES_MODE_MASK | LRA_HIGH_Z_MASK | LRA_RES_CAL_MASK;
@@ -549,7 +549,8 @@ static int spmi_haptics_init(struct spmi_haptics *haptics)
 	if (ret < 0)
 		return ret;
 
-	/* Configure the ILIM register */
+	/* Configure the ILIM register: 800 mA as the stock msm8998 haptics */
+	haptics->current_limit = HAP_ILIM_800_MA;
 	ret = spmi_haptics_write_current_limit(haptics);
 	if (ret < 0)
 		return ret;
