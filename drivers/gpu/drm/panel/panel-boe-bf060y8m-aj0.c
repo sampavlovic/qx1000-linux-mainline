@@ -99,21 +99,11 @@ static int boe_bf060y8m_aj0_on(struct boe_bf060y8m_aj0 *boe)
 	return dsi_ctx.accum_err;
 }
 
-static void boe_bf060y8m_aj0_off(struct boe_bf060y8m_aj0 *boe)
-{
-	struct mipi_dsi_device *dsi = boe->dsi;
-	struct mipi_dsi_multi_context dsi_ctx = { .dsi = dsi };
-
-	/* OFF commands sent in HS mode; display off went out in disable */
-	dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;
-	mipi_dsi_dcs_enter_sleep_mode_multi(&dsi_ctx);
-	mipi_dsi_usleep_range(&dsi_ctx, 1000, 2000);
-	dsi->mode_flags |= MIPI_DSI_MODE_LPM;
-}
-
 /*
- * Display off goes out while the host still streams video. Sent from
- * unprepare, after the stream has stopped, the panel scanned out one
+ * The off commands go out while the host still streams video. From
+ * unprepare, after the stream has stopped, they cannot be sent at all
+ * (msm8998: the video engine stays busy, "wait for video done timed out",
+ * -ETIMEDOUT), and with display off missing the panel scanned out a
  * corrupted frame at full brightness before turning off.
  */
 static int boe_bf060y8m_aj0_disable(struct drm_panel *panel)
@@ -125,6 +115,8 @@ static int boe_bf060y8m_aj0_disable(struct drm_panel *panel)
 	dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;
 	mipi_dsi_dcs_set_display_off_multi(&dsi_ctx);
 	mipi_dsi_msleep(&dsi_ctx, 20);
+	mipi_dsi_dcs_enter_sleep_mode_multi(&dsi_ctx);
+	mipi_dsi_usleep_range(&dsi_ctx, 1000, 2000);
 	dsi->mode_flags |= MIPI_DSI_MODE_LPM;
 
 	return dsi_ctx.accum_err;
@@ -186,8 +178,6 @@ err_elvss:
 static int boe_bf060y8m_aj0_unprepare(struct drm_panel *panel)
 {
 	struct boe_bf060y8m_aj0 *boe = to_boe_bf060y8m_aj0(panel);
-
-	boe_bf060y8m_aj0_off(boe);
 
 	gpiod_set_value_cansleep(boe->reset_gpio, 1);
 	regulator_bulk_disable(ARRAY_SIZE(boe->vregs), boe->vregs);
