@@ -1,0 +1,21 @@
+#!/bin/sh
+# Factory radio addresses. The stock bootloader hands them to Android; on our DT
+# boot WiFi picks a random MAC each boot and Bluetooth stays unconfigured (no BD
+# address). Derive both from the factory WiFi MAC in persist/wlan_mac.bin.
+set -eu
+P=/run/pro1-persist
+mkdir -p $P
+mountpoint -q $P || mount -o ro,noload /dev/disk/by-partlabel/persist $P
+hex=$(sed -n 's/^Intf0MacAddress=//p' $P/wlan_mac.bin | tr -d '\r')
+umount $P
+mac=$(echo "$hex" | sed 's/../&:/g; s/:$//' | tr A-F a-f)
+[ ${#mac} -eq 17 ] || { echo "no factory MAC in persist" >&2; exit 1; }
+
+# WiFi: udev applies this when wlan0 appears (the modem brings it up later)
+L=/etc/systemd/network/10-pro1-wlan.link
+[ -f $L ] || printf '[Match]\nPath=platform-18800000.wifi\n\n[Link]\nMACAddress=%s\n' "$mac" > $L
+
+# Bluetooth: same bytes with first octet 0x04, so it differs from WiFi
+for i in $(seq 30); do [ -e /sys/class/bluetooth/hci0 ] && break; sleep 1; done
+# (rejected once the controller is configured, i.e. on a re-run: fine)
+btmgmt --index 0 public-addr "04${mac#02}" > /dev/null || true

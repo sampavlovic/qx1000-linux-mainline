@@ -1,0 +1,35 @@
+#!/usr/bin/python3 -I
+"""Open rpmsg char endpoints on a glink edge (what linux-msm's rpmsgexport does).
+
+    pro1-rpmsg-export /dev/rpmsg_ctrlN NAME...
+    pro1-rpmsg-export --selftest
+
+The modem does not announce its DIAG channels: the AP opens them and diag-router,
+which watches udev for rpmsg char devices, drains them.
+"""
+import fcntl
+import os
+import struct
+import sys
+
+RPMSG_CREATE_EPT_IOCTL = 0x4028B501  # _IOW(0xb5, 1, struct rpmsg_endpoint_info), 40 bytes
+RPMSG_ADDR_ANY = 0xFFFFFFFF
+
+
+def endpoint_info(name):
+    assert 0 < len(name) < 32, name
+    return struct.pack("32sII", name.encode(), RPMSG_ADDR_ANY, RPMSG_ADDR_ANY)
+
+
+if __name__ == "__main__":
+    if sys.argv[1:] == ["--selftest"]:
+        b = endpoint_info("DIAG")
+        assert len(b) == 40 and b[:5] == b"DIAG\0" and b[32:] == b"\xff" * 8
+        assert RPMSG_CREATE_EPT_IOCTL == (1 << 30) | (40 << 16) | (0xB5 << 8) | 1
+        print("selftest ok")
+        sys.exit(0)
+    if len(sys.argv) < 3:
+        sys.exit(__doc__)
+    fd = os.open(sys.argv[1], os.O_RDWR)
+    for name in sys.argv[2:]:
+        fcntl.ioctl(fd, RPMSG_CREATE_EPT_IOCTL, endpoint_info(name))

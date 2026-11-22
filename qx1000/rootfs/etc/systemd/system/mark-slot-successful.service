@@ -1,0 +1,10 @@
+[Unit]
+Description=Mark A/B slot b as successfully booted for the Qualcomm bootloader
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/mark-slot-successful
+
+[Install]
+WantedBy=multi-user.target

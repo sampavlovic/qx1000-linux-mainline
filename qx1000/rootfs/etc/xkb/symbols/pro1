@@ -1,0 +1,41 @@
+// F(x)tec Pro1 QWERTY: US plus the yellow fn layer of the stock qx1000.c driver
+// (qwerty_fn_keys). Both fn keys report RIGHTALT (device tree), the level-3 shift here.
+default partial alphanumeric_keys modifier_keys
+xkb_symbols "basic" {
+	include "us(basic)"
+	include "level3(ralt_switch)"
+	name[Group1] = "English (F(x)tec Pro1)";
+
+	key.type[Group1] = "FOUR_LEVEL";
+	key <AE01> { [ 1, exclam, exclam, exclam ] };
+	key <AE02> { [ 2, at, at, at ] };
+	key <AE03> { [ 3, numbersign, numbersign, numbersign ] };
+	key <AE04> { [ 4, dollar, dollar, dollar ] };
+	key <AE05> { [ 5, percent, percent, percent ] };
+	key <AE06> { [ 6, asciicircum, asciicircum, asciicircum ] };
+	key <AE07> { [ 7, ampersand, ampersand, ampersand ] };
+	key <AE08> { [ 8, asterisk, asterisk, asterisk ] };
+	key <AE09> { [ 9, parenleft, parenleft, parenleft ] };
+	key <AE10> { [ 0, parenright, parenright, parenright ] };
+	key <AE11> { [ minus, underscore, underscore, underscore ] };
+	key <AE12> { [ equal, plus, plus, plus ] };
+	key <AD11> { [ bracketleft, braceleft, braceleft, braceleft ] };
+	key <AD12> { [ bracketright, braceright, braceright, braceright ] };
+	key <AC10> { [ semicolon, colon, colon, colon ] };
+	key <AC11> { [ apostrophe, quotedbl, quotedbl, quotedbl ] };
+	key <TLDE> { [ grave, asciitilde, asciitilde, asciitilde ] };
+	key <BKSL> { [ backslash, bar, bar, bar ] };
+	key <AB08> { [ comma, less, less, less ] };
+	key <AB09> { [ period, greater, greater, greater ] };
+
+	key.type[Group1] = "FOUR_LEVEL_ALPHABETIC";
+	key <AD10> { [ p, P, slash, slash ] };
+	key <AC09> { [ l, L, question, question ] };
+
+	key.type[Group1] = "FOUR_LEVEL";
+	key <UP>   { [ Up, Up, Prior, Prior ] };
+	key <DOWN> { [ Down, Down, Next, Next ] };
+	key <LEFT> { [ Left, Left, Home, Home ] };
+	key <RGHT> { [ Right, Right, End, End ] };
+	key <DELE> { [ Delete, Delete, Insert, Insert ] };
+};

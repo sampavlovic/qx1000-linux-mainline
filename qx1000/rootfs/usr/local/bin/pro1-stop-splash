@@ -1,0 +1,12 @@
+#!/usr/bin/python3
+# Stop the bootloader/UEFI splash scan-out (DPU INTF_1 timing engine, MSM8998)
+# right before msm loads. Once msm attaches its IOMMU domain the splash buffer
+# is unmapped, and a still-running scan-out turns into an SMMU fault storm.
+import ctypes, mmap, os
+
+INTF1_TIMING_ENGINE_EN = 0x0C901000 + 0x6A800  # mdp base + intf_1, reg offset 0
+
+fd = os.open("/dev/mem", os.O_RDWR | os.O_SYNC)
+page = INTF1_TIMING_ENGINE_EN & ~(mmap.PAGESIZE - 1)
+m = mmap.mmap(fd, mmap.PAGESIZE, offset=page)
+ctypes.c_uint32.from_buffer(m, INTF1_TIMING_ENGINE_EN - page).value = 0  # single 32-bit store

@@ -1,0 +1,15 @@
+[Unit]
+Description=Build ath10k board-2.bin from this phone's own WLAN calibration (modem_b)
+ConditionPathExists=!/var/lib/pro1-wlan-bdf.done
+Before=rmtfs.service
+
+[Service]
+Type=oneshot
+ExecStartPre=/usr/bin/mkdir -p /run/modem_b
+ExecStartPre=/usr/bin/mount -o ro /dev/disk/by-partlabel/modem_b /run/modem_b
+ExecStart=/usr/local/bin/pro1-wlan-bdf /run/modem_b/image
+ExecStartPost=/usr/bin/touch /var/lib/pro1-wlan-bdf.done
+ExecStopPost=-/usr/bin/umount /run/modem_b
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,12 @@
+[connection]
+id=usb0
+type=ethernet
+interface-name=usb0
+autoconnect=true
+
+[ipv4]
+method=manual
+address1=169.254.42.1/16
+
+[ipv6]
+method=link-local

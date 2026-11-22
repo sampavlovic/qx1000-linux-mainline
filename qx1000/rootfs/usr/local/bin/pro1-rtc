@@ -1,0 +1,10 @@
+#!/bin/sh
+# The PM8998 RTC only counts seconds since the battery was first connected (it
+# reads as 1972). Linux may not write it, and the offset the stock OS keeps is
+# out of reach, so keep our own: system time = RTC counter + saved offset.
+F=/var/lib/pro1-rtc-offset R=/sys/class/rtc/rtc0/since_epoch
+case "$1" in
+restore) [ -s "$F" ] || exit 0; date -u -s "@$(( $(cat $R) + $(cat $F) ))" > /dev/null ;;
+save) echo "$(( $(date -u +%s) - $(cat $R) ))" > "$F" ;;
+*) echo "usage: $0 restore|save" >&2; exit 2 ;;
+esac

@@ -1,0 +1,22 @@
+#!/bin/sh
+# Tell the Qualcomm ABL that the current slot booted fine by setting GPT
+# attribute bit 54 ("successful") on boot_<slot>. Without it the ABL burns one
+# retry per boot and, after 7, marks the slot unbootable and switches slots.
+# Usage: mark-slot-successful [DISK PARTNUM]   (default: the boot_b partition)
+set -eu
+if [ $# -eq 2 ]; then
+	disk=$1 num=$2
+else
+	part=$(readlink -f /dev/disk/by-partlabel/boot_b)
+	disk=/dev/$(lsblk -no PKNAME "$part")
+	num=$(cat "/sys/class/block/${part#/dev/}/partition")
+fi
+# sfdisk prints e.g. "RequiredPartition GUID:48,49,54" and accepts the same back
+attrs=$(sfdisk --part-attrs "$disk" "$num")
+bits=$(echo "$attrs" | sed -n 's/.*GUID:\([0-9,]*\).*/\1/p')
+case ",$bits," in *,54,*) exit 0 ;; esac
+case "$attrs" in
+*GUID:*) new="$attrs,54" ;;
+*) new="${attrs:+$attrs }GUID:54" ;;
+esac
+sfdisk -q --no-reread --no-tell-kernel --part-attrs "$disk" "$num" "$new"

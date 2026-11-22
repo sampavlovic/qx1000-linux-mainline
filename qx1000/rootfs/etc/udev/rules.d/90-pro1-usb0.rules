@@ -1,0 +1,2 @@
+# Let NetworkManager manage the g_ether gadget (Fedora leaves USB gadget netdevs unmanaged)
+SUBSYSTEM=="net", KERNEL=="usb0", ENV{NM_UNMANAGED}="0"

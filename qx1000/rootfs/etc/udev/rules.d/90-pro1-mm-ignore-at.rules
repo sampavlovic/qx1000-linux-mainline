@@ -1,0 +1,3 @@
+# Probing the msm8998 modem AT ports (rpmsg DATA1/DATA4) starves a modem task until
+# its watchdog fires. QMI on this modem is over QRTR, so the AT ports are not needed.
+SUBSYSTEM=="wwan", KERNEL=="wwan*at*", ENV{ID_MM_DEVICE_IGNORE}="1"

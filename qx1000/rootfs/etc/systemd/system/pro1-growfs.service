@@ -1,0 +1,13 @@
+[Unit]
+Description=Grow the root btrfs to the whole userdata partition
+# The image is flashed smaller than the partition (ABL refuses a sparse image of the full
+# size); no-op once it fills it. systemd-growfs can't resolve a root mounted without
+# initramfs (/dev/root), btrfs can resize it online by mount point.
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/btrfs filesystem resize max /
+
+[Install]
+WantedBy=multi-user.target

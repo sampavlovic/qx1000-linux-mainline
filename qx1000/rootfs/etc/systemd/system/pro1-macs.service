@@ -1,0 +1,12 @@
+[Unit]
+Description=Factory WiFi/Bluetooth addresses from the persist partition
+After=bluetooth.service local-fs.target
+Wants=bluetooth.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/pro1-macs
+
+[Install]
+WantedBy=multi-user.target

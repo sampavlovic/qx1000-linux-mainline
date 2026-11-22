@@ -1,0 +1,81 @@
+#!/usr/bin/python3 -I
+"""Build ath10k board-2.bin from this phone's own WLAN board data.
+
+The stock driver feeds the WCN3990 firmware bdwlan.bin (board id 0xff) or
+bdwlan.bXX from the modem partition. The board-2.bin shipped in the public
+Pro1 firmware dump carries different calibration blobs, and the WLAN firmware
+asserts on them (EX:wlan_process ... WLAN RT). Usage:
+
+    pro1-wlan-bdf [MODEM_IMAGE_DIR] [OUT]
+    pro1-wlan-bdf --selftest
+"""
+import os
+import re
+import struct
+import sys
+
+MAGIC = b"QCA-ATH10K-BOARD\0"
+IE_BOARD, IE_NAME, IE_DATA = 0, 0, 1
+
+
+def ie(kind, payload):
+    pad = (-len(payload)) % 4
+    return struct.pack("<II", kind, len(payload)) + payload + b"\0" * pad
+
+
+def encode(boards):
+    """boards: {board_id_hex_str: bytes} -> board-2.bin bytes"""
+    out = MAGIC + b"\0" * ((-len(MAGIC)) % 4)
+    for bid, data in sorted(boards.items()):
+        name = f"bus=snoc,qmi-board-id={bid}".encode()
+        out += ie(IE_BOARD, ie(IE_NAME, name) + ie(IE_DATA, data))
+    return out
+
+
+def decode(blob):
+    assert blob.startswith(MAGIC)
+    i, res = len(MAGIC) + (-len(MAGIC)) % 4, {}
+    while i + 8 <= len(blob):
+        kind, ln = struct.unpack_from("<II", blob, i)
+        body, i = blob[i + 8:i + 8 + ln], i + 8 + ln + (-ln) % 4
+        j, name = 0, None
+        while j + 8 <= len(body):
+            sk, sl = struct.unpack_from("<II", body, j)
+            sb, j = body[j + 8:j + 8 + sl], j + 8 + sl + (-sl) % 4
+            if sk == IE_NAME:
+                name = sb.decode()
+            elif sk == IE_DATA and kind == IE_BOARD:
+                res[name] = sb
+    return res
+
+
+def from_dir(d):
+    boards = {}
+    for f in os.listdir(d):
+        if f == "bdwlan.bin":
+            boards["ff"] = open(os.path.join(d, f), "rb").read()
+        elif m := re.fullmatch(r"bdwlan\.(?:b([0-9a-f]{2})|(1[0-9a-f]{2}))", f):
+            bid = format(int(m.group(1) or m.group(2), 16), "x")
+            boards[bid] = open(os.path.join(d, f), "rb").read()
+    return boards
+
+
+def selftest():
+    boards = {"ff": b"default-cal", "4": b"x" * 5, "102": b"\x01\x02\x03"}
+    got = decode(encode(boards))
+    assert got == {f"bus=snoc,qmi-board-id={k}": v for k, v in boards.items()}, got
+    print("selftest ok")
+
+
+if __name__ == "__main__":
+    if sys.argv[1:] == ["--selftest"]:
+        selftest()
+        sys.exit(0)
+    src = sys.argv[1] if len(sys.argv) > 1 else "/run/modem_b/image"
+    dst = sys.argv[2] if len(sys.argv) > 2 else "/usr/lib/firmware/ath10k/WCN3990/hw1.0/board-2.bin"
+    boards = from_dir(src)
+    if "ff" not in boards:
+        sys.exit(f"no bdwlan.bin in {src}")
+    open(dst + ".new", "wb").write(encode(boards))
+    os.replace(dst + ".new", dst)
+    print(f"wrote {dst} with {len(boards)} boards")
