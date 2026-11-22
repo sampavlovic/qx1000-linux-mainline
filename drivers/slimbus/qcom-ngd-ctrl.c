@@ -1045,7 +1045,13 @@ static int qcom_slim_ngd_enable_stream(struct slim_stream_runtime *rt)
 		if (txn.msg->num_bytes == 0) {
 			int exp = 0, coef = 0;
 
-			wbuf[txn.msg->num_bytes++] = sdev->laddr;
+			/*
+			 * Data format (bits 7:5) and the 5-bit client number, as
+			 * downstream defines it: the MSM8998 ADSP reads the raw
+			 * logical address 0xcf as data format 6 and moves no
+			 * samples. Format 0, "not defined", like the vendor driver.
+			 */
+			wbuf[txn.msg->num_bytes++] = sdev->laddr & 0x1f;
 			wbuf[txn.msg->num_bytes] = rt->bps >> 2 |
 						   (port->ch.aux_fmt << 6);
 
