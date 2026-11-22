@@ -1,0 +1,36 @@
+name: Build and release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bc bison flex libssl-dev libelf-dev \
+            zstd dosfstools mtools systemd-boot-efi
+
+      - name: Build
+        run: qx1000/build.sh
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=r${{ github.run_number }}
+          gh release create "$tag" out/boot.img out/vmlinuz.efi out/msm8998-fxtec-pro1.dtb \
+            out/modules-*.tar.zst out/rootfs-overlay.tar.gz out/config-* \
+            --target "$GITHUB_SHA" --title "Build $tag" \
+            --notes "Kernel $(cat include/config/kernel.release) from ${GITHUB_SHA::12}. Flash: fastboot flash boot_a boot.img. Install modules-*.tar.zst into /usr/lib/modules and rootfs-overlay.tar.gz into / on the root filesystem. See qx1000/README.md."
