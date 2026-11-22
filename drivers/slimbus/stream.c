@@ -227,6 +227,8 @@ int slim_stream_prepare(struct slim_stream_runtime *rt,
 	if (prrate < 0) {
 		dev_err(&rt->dev->dev, "Cannot get presence rate for rate %d Hz\n",
 			cfg->rate);
+		kfree(rt->ports);
+		rt->ports = NULL;
 		return prrate;
 	}
 
