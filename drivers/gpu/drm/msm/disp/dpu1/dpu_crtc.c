@@ -1457,6 +1457,19 @@ static int dpu_crtc_assign_resources(struct drm_crtc *crtc,
 	topology = dpu_crtc_get_topology(crtc, dpu_kms, crtc_state);
 	ret = dpu_rm_reserve(&dpu_kms->rm, global_state,
 			     crtc_state->crtc, &topology);
+	if (ret && topology.num_dspp) {
+		/*
+		 * MSM8998 has DSPPs only on LM_0/LM_1, and the internal panel
+		 * holds one of them: a wide external mode needs the LM_2/LM_5
+		 * pair, which has none. Drive it without colour correction
+		 * rather than refuse the mode.
+		 */
+		DRM_DEBUG_ATOMIC("no DSPP for %d LMs, reserving without\n",
+				 topology.num_lm);
+		topology.num_dspp = 0;
+		ret = dpu_rm_reserve(&dpu_kms->rm, global_state,
+				     crtc_state->crtc, &topology);
+	}
 	if (ret)
 		return ret;
 
