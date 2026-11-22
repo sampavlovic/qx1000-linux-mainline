@@ -2264,6 +2264,18 @@ static void typec_partner_deattach(struct typec_connector *con, struct device *d
  *
  * This routine is used by the port drivers to report data role changes.
  */
+/*
+ * Partner alt mode drivers (e.g. DisplayPort) only bind while the port is
+ * the DFP; when the partner registered its modes before a data role swap to
+ * host, the probe failed with -EPROTO and nothing retried it.
+ */
+static int typec_attach_partner_altmode(struct device *dev, void *data)
+{
+	if (is_typec_partner_altmode(dev) && !dev->driver)
+		WARN_ON(device_attach(dev) < 0);
+	return 0;
+}
+
 void typec_set_data_role(struct typec_port *port, enum typec_data_role role)
 {
 	struct typec_partner *partner;
@@ -2281,6 +2293,10 @@ void typec_set_data_role(struct typec_port *port, enum typec_data_role role)
 
 	if (partner->identity)
 		typec_product_type_notify(&partner->dev);
+
+	if (role == TYPEC_HOST)
+		device_for_each_child(&partner->dev, NULL,
+				      typec_attach_partner_altmode);
 
 	put_device(&partner->dev);
 }
