@@ -59,6 +59,9 @@
 
 #define USB_PDPHY_RX_BUFFER_REG		0x80
 
+#define USB_PDPHY_SEC_ACCESS_REG	0xD0
+#define USB_PDPHY_TRIM_3_REG		0xF3
+
 /* VDD regulator */
 #define VDD_PDPHY_VOL_MIN		2800000	/* uV */
 #define VDD_PDPHY_VOL_MAX		3300000	/* uV */
@@ -96,6 +99,7 @@ struct pmic_typec_pdphy {
 
 	unsigned int			nr_irqs;
 	struct pmic_typec_pdphy_irq_data	*irq_data;
+	u8				trim_3;
 
 	struct work_struct		reset_work;
 	struct work_struct		receive_work;
@@ -520,6 +524,19 @@ static int qcom_pmic_typec_pdphy_start(struct pmic_typec *tcpm,
 
 	pmic_typec_pdphy->tcpm_port = tcpm_port;
 
+	/* Vendor qpnp-pdphy (PMI8998) unlocks and writes this trim at probe */
+	if (pmic_typec_pdphy->trim_3) {
+		ret = regmap_write(pmic_typec_pdphy->regmap,
+				   pmic_typec_pdphy->base + USB_PDPHY_SEC_ACCESS_REG,
+				   0xA5);
+		if (!ret)
+			ret = regmap_write(pmic_typec_pdphy->regmap,
+					   pmic_typec_pdphy->base + USB_PDPHY_TRIM_3_REG,
+					   pmic_typec_pdphy->trim_3);
+		if (ret)
+			goto err_disable_vdd_pdhy;
+	}
+
 	ret = pmic_typec_pdphy_reset(pmic_typec_pdphy);
 	if (ret)
 		goto err_disable_vdd_pdhy;
@@ -582,6 +599,7 @@ int qcom_pmic_typec_pdphy_probe(struct platform_device *pdev,
 	pmic_typec_pdphy->regmap = regmap;
 	pmic_typec_pdphy->nr_irqs = res->nr_irqs;
 	pmic_typec_pdphy->irq_data = irq_data;
+	pmic_typec_pdphy->trim_3 = res->trim_3;
 	spin_lock_init(&pmic_typec_pdphy->lock);
 	INIT_WORK(&pmic_typec_pdphy->reset_work, qcom_pmic_typec_pdphy_sig_reset_work);
 
@@ -647,4 +665,40 @@ const struct pmic_typec_pdphy_resources pm8150b_pdphy_res = {
 		},
 	},
 	.nr_irqs = 7,
+};
+
+/* Same registers and irq lines as PM8150B (vendor qpnp-pdphy.c) plus a trim */
+const struct pmic_typec_pdphy_resources pmi8998_pdphy_res = {
+	.irq_params = {
+		{
+			.virq = PMIC_PDPHY_SIG_TX_IRQ,
+			.irq_name = "sig-tx",
+		},
+		{
+			.virq = PMIC_PDPHY_SIG_RX_IRQ,
+			.irq_name = "sig-rx",
+		},
+		{
+			.virq = PMIC_PDPHY_MSG_TX_IRQ,
+			.irq_name = "msg-tx",
+		},
+		{
+			.virq = PMIC_PDPHY_MSG_RX_IRQ,
+			.irq_name = "msg-rx",
+		},
+		{
+			.virq = PMIC_PDPHY_MSG_TX_FAIL_IRQ,
+			.irq_name = "msg-tx-failed",
+		},
+		{
+			.virq = PMIC_PDPHY_MSG_TX_DISCARD_IRQ,
+			.irq_name = "msg-tx-discarded",
+		},
+		{
+			.virq = PMIC_PDPHY_MSG_RX_DISCARD_IRQ,
+			.irq_name = "msg-rx-discarded",
+		},
+	},
+	.nr_irqs = 7,
+	.trim_3 = 0x2,
 };

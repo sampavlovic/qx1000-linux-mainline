@@ -820,8 +820,8 @@ static const struct power_supply_desc smb_psy_desc = {
 static const struct smb_init_register smb_init_seq[] = {
 	{ .addr = AICL_RERUN_TIME_CFG, .mask = AICL_RERUN_TIME_MASK, .val = 0 },
 	/*
-	 * By default configure us as an upstream facing port
-	 * FIXME: This will be handled by the type-c driver
+	 * By default configure us as an upstream facing port. Skipped when a
+	 * "qcom,pmi8998-typec" TCPM port owns this register (smb_init_hw()).
 	 */
 	{ .addr = TYPE_C_INTRPT_ENB_SOFTWARE_CTRL,
 	  .mask = TYPEC_POWER_ROLE_CMD_MASK | VCONN_EN_SRC_BIT |
@@ -919,11 +919,29 @@ static const struct smb_init_register smb_init_seq[] = {
 	  .val = 1000000 / CURRENT_SCALE_FACTOR },
 };
 
+/* An enabled Type-C port (TCPM) on this PMIC owns the Type-C role/VCONN bits */
+static bool smb_has_typec_port(struct smb_chip *chip)
+{
+	struct device_node *np;
+	bool ret;
+
+	np = of_get_compatible_child(chip->dev->parent->of_node,
+				     "qcom,pmi8998-typec");
+	ret = of_device_is_available(np);
+	of_node_put(np);
+
+	return ret;
+}
+
 static int smb_init_hw(struct smb_chip *chip)
 {
+	bool typec_port = smb_has_typec_port(chip);
 	int rc, i;
 
 	for (i = 0; i < ARRAY_SIZE(smb_init_seq); i++) {
+		if (typec_port &&
+		    smb_init_seq[i].addr == TYPE_C_INTRPT_ENB_SOFTWARE_CTRL)
+			continue;
 		dev_dbg(chip->dev, "%d: Writing 0x%02x to 0x%02x\n", i,
 			smb_init_seq[i].val, smb_init_seq[i].addr);
 		rc = regmap_update_bits(chip->regmap,
