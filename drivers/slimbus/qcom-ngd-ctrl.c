@@ -159,6 +159,7 @@ struct qcom_slim_ngd_ctrl {
 	struct completion reconf;
 	struct work_struct m_work;
 	struct work_struct ngd_up_work;
+	bool registered;
 	struct workqueue_struct *mwq;
 	struct completion qmi_up;
 	spinlock_t tx_buf_lock;
@@ -1328,7 +1329,19 @@ static int qcom_slim_ngd_runtime_resume(struct device *dev)
 static int qcom_slim_ngd_enable(struct qcom_slim_ngd_ctrl *ctrl, bool enable)
 {
 	if (enable) {
-		int ret = qcom_slim_qmi_init(ctrl, false);
+		int ret;
+
+		/*
+		 * Both the SSR notifier and PDR report the DSP up, often both
+		 * at boot. A second enable re-ran the QMI init, dropped a
+		 * runtime PM reference that was never taken and registered the
+		 * controller and its devices twice, leaving the DSP's SLIMbus
+		 * satellite in a state where streams timed out.
+		 */
+		if (ctrl->registered)
+			return 0;
+
+		ret = qcom_slim_qmi_init(ctrl, false);
 
 		if (ret) {
 			dev_err(ctrl->dev, "qmi init fail, ret:%d, state:%d\n",
@@ -1352,10 +1365,12 @@ static int qcom_slim_ngd_enable(struct qcom_slim_ngd_ctrl *ctrl, bool enable)
 			return ret;
 		}
 
+		ctrl->registered = true;
 		dev_info(ctrl->dev, "SLIM controller Registered\n");
 	} else {
 		qcom_slim_qmi_exit(ctrl);
 		slim_unregister_controller(&ctrl->ctrl);
+		ctrl->registered = false;
 	}
 
 	return 0;
