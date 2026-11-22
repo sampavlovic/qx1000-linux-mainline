@@ -208,6 +208,13 @@ config BATTERY_PMU
 	  Say Y here to expose battery information on Apple machines
 	  through the generic battery class.
 
+config BATTERY_QCOM_FG
+	tristate "Qualcomm PMI8994/PMI8998 fuel gauge"
+	depends on MFD_SPMI_PMIC
+	help
+	  Fuel gauge (battery capacity, voltage, current, status) found
+	  on Qualcomm PMI8994/PMI8998 PMICs.
+
 config BATTERY_QCOM_BATTMGR
 	tristate "Qualcomm PMIC GLINK battery manager support"
 	depends on QCOM_PMIC_GLINK
