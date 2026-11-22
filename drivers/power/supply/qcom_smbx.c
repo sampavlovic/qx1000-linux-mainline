@@ -21,6 +21,7 @@
 #include <linux/power_supply.h>
 #include <linux/regmap.h>
 #include <linux/types.h>
+#include <linux/usb/typec_mux.h>
 #include <linux/workqueue.h>
 
 /* clang-format off */
@@ -135,6 +136,9 @@
 #define SDP_CHARGER_BIT					BIT(0)
 
 #define USBIN_CMD_IL					0x340
+#define TYPE_C_STATUS_4					0x30e
+#define TYPEC_CC_ORIENTATION_BIT			BIT(1)
+#define TYPEC_CC_ATTACHED_BIT				BIT(0)
 #define USBIN_SUSPEND_BIT				BIT(0)
 
 #define TYPE_C_STATUS_1					0x30B
@@ -400,6 +404,9 @@ struct smb_chip {
 	struct iio_channel *usb_in_v_chan;
 
 	struct power_supply *chg_psy;
+
+	/* USB-C lane orientation for the SuperSpeed PHY ("orientation-switch") */
+	struct typec_switch *orientation_sw;
 };
 
 static enum power_supply_property smb_properties[] = {
@@ -736,11 +743,34 @@ static irqreturn_t smb_handle_batt_overvoltage(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
+/*
+ * The SMB2 Type-C block reports which CC pin the plug attached on; tell the
+ * QMP USB-C PHY so it picks the SuperSpeed lanes (there is no PD/Type-C port
+ * driver for PMI8998, so nothing else does).
+ */
+static void smb_update_orientation(struct smb_chip *chip)
+{
+	unsigned int stat;
+
+	if (IS_ERR_OR_NULL(chip->orientation_sw))
+		return;
+	if (regmap_read(chip->regmap, chip->base + TYPE_C_STATUS_4, &stat))
+		return;
+	if (!(stat & TYPEC_CC_ATTACHED_BIT))
+		return;
+
+	typec_switch_set(chip->orientation_sw,
+			 (stat & TYPEC_CC_ORIENTATION_BIT) ?
+			 TYPEC_ORIENTATION_REVERSE : TYPEC_ORIENTATION_NORMAL);
+}
+
 static irqreturn_t smb_handle_usb_plugin(int irq, void *data)
 {
 	struct smb_chip *chip = data;
 
 	power_supply_changed(chip->chg_psy);
+
+	smb_update_orientation(chip);
 
 	schedule_delayed_work(&chip->status_change_work,
 			      msecs_to_jiffies(1500));
@@ -992,6 +1022,12 @@ static int smb_probe(struct platform_device *pdev)
 	if (rc)
 		return dev_err_probe(chip->dev, rc,
 				     "Failed to get battery info\n");
+
+	chip->orientation_sw = fwnode_typec_switch_get(dev_fwnode(chip->dev));
+	if (IS_ERR(chip->orientation_sw))
+		return dev_err_probe(chip->dev, PTR_ERR(chip->orientation_sw),
+				     "failed to get the orientation switch\n");
+	smb_update_orientation(chip);
 
 	rc = devm_delayed_work_autocancel(chip->dev, &chip->status_change_work,
 					  smb_status_change_work);
