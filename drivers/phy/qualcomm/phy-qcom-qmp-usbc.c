@@ -568,6 +568,8 @@ struct qmp_usbc {
 	struct phy *usb_phy;
 	enum phy_mode mode;
 	unsigned int usb_init_count;
+	/* USB is initialised but the PHY runs DP: it can't do both at once */
+	bool usb_held_by_dp;
 
 	struct phy *dp_phy;
 	unsigned int dp_aux_cfg;
@@ -1439,19 +1441,6 @@ static int qmp_usbc_usb_power_off(struct phy *phy)
 	return 0;
 }
 
-static int qmp_usbc_check_phy_status(struct qmp_usbc *qmp, bool is_dp)
-{
-	if ((is_dp && qmp->usb_init_count) ||
-	    (!is_dp && qmp->dp_init_count)) {
-		dev_err(qmp->dev,
-			"PHY is configured for %s, can not enable %s\n",
-			is_dp ? "USB" : "DP", is_dp ? "DP" : "USB");
-		return -EBUSY;
-	}
-
-	return 0;
-}
-
 static int qmp_usbc_usb_enable(struct phy *phy)
 {
 	struct qmp_usbc *qmp = phy_get_drvdata(phy);
@@ -1459,13 +1448,15 @@ static int qmp_usbc_usb_enable(struct phy *phy)
 
 	mutex_lock(&qmp->phy_mutex);
 
-	ret = qmp_usbc_check_phy_status(qmp, false);
-	if (ret)
-		goto out_unlock;
-
 	ret = qmp_usbc_com_init(phy);
 	if (ret)
 		goto out_unlock;
+
+	if (qmp->dp_init_count) {
+		qmp->usb_held_by_dp = true;
+		qmp->usb_init_count++;
+		goto out_unlock;
+	}
 
 	qmp_usbc_set_phy_mode(qmp, false);
 
@@ -1487,11 +1478,15 @@ static int qmp_usbc_usb_disable(struct phy *phy)
 	struct qmp_usbc *qmp = phy_get_drvdata(phy);
 	int ret;
 
+	mutex_lock(&qmp->phy_mutex);
 	qmp->usb_init_count--;
-	ret = qmp_usbc_usb_power_off(phy);
-	if (ret)
-		return ret;
-	return qmp_usbc_com_exit(phy);
+	if (qmp->usb_held_by_dp)
+		qmp->usb_held_by_dp = false;
+	else
+		qmp_usbc_usb_power_off(phy);
+	ret = qmp_usbc_com_exit(phy);
+	mutex_unlock(&qmp->phy_mutex);
+	return ret;
 }
 
 static int qmp_usbc_usb_set_mode(struct phy *phy, enum phy_mode mode, int submode)
@@ -1516,9 +1511,10 @@ static int qmp_usbc_dp_enable(struct phy *phy)
 
 	mutex_lock(&qmp->phy_mutex);
 
-	ret = qmp_usbc_check_phy_status(qmp, true);
-	if (ret)
-		goto dp_init_unlock;
+	if (qmp->usb_init_count && !qmp->usb_held_by_dp) {
+		qmp_usbc_usb_power_off(qmp->usb_phy);
+		qmp->usb_held_by_dp = true;
+	}
 
 	ret = qmp_usbc_com_init(phy);
 	if (ret)
@@ -1544,6 +1540,14 @@ static int qmp_usbc_dp_disable(struct phy *phy)
 	qmp_usbc_com_exit(phy);
 
 	qmp->dp_init_count--;
+
+	if (qmp->usb_held_by_dp) {
+		/* com_exit asserted the shared resets; USB still holds the rest */
+		reset_control_bulk_deassert(qmp->num_resets, qmp->resets);
+		qmp_usbc_set_phy_mode(qmp, false);
+		if (!qmp_usbc_usb_power_on(qmp->usb_phy))
+			qmp->usb_held_by_dp = false;
+	}
 
 	mutex_unlock(&qmp->phy_mutex);
 
@@ -2085,7 +2089,7 @@ static int qmp_usbc_typec_switch_set(struct typec_switch_dev *sw,
 	mutex_lock(&qmp->phy_mutex);
 	qmp->orientation = orientation;
 
-	if (qmp->usb_init_count) {
+	if (qmp->usb_init_count && !qmp->usb_held_by_dp) {
 		qmp_usbc_usb_power_off(qmp->usb_phy);
 		qmp_usbc_com_exit(qmp->usb_phy);
 
