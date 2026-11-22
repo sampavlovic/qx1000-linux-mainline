@@ -209,6 +209,14 @@ config KEYBOARD_GPIO
 	  To compile this driver as a module, choose M here: the
 	  module will be called gpio_keys.
 
+config KEYBOARD_GPIO_FASTMATRIX
+	tristate "Fast GPIO matrix keyboard (slow I2C expanders)"
+	depends on GPIOLIB
+	select INPUT_MATRIXKMAP
+	help
+	  GPIO keyboard matrix driver tolerant of slow I2C GPIO
+	  expanders, used by the F(x)tec Pro1.
+
 config KEYBOARD_GPIO_POLLED
 	tristate "Polled GPIO buttons"
 	depends on GPIOLIB
