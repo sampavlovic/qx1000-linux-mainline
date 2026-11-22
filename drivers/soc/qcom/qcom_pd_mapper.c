@@ -408,9 +408,18 @@ static const struct qcom_pdm_domain_data *msm8996_domains[] = {
 	NULL,
 };
 
+/*
+ * Matches the adsp/modem/slpi .jsn files of the stock msm8998 firmware,
+ * except for the ADSP audio PD: its servreg never answers a listener
+ * registration, so PDR declared avs/audio down and tore SLIMbus down.
+ * Without it SLIMbus follows the ADSP through SSR alone, as on msm8996.
+ */
 static const struct qcom_pdm_domain_data *msm8998_domains[] = {
+	&adsp_root_pd,
 	&mpss_root_pd,
 	&mpss_wlan_pd,
+	&slpi_root_pd,
+	&slpi_sensor_pd,
 	NULL,
 };
 
