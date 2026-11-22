@@ -1721,6 +1721,7 @@ static void check_speed_bin(struct device *dev)
 
 static struct msm_gpu *a5xx_gpu_init(struct drm_device *dev)
 {
+	extern int enable_preemption;
 	struct msm_drm_private *priv = dev->dev_private;
 	struct platform_device *pdev = priv->gpu_pdev;
 	struct adreno_platform_config *config = pdev->dev.platform_data;
@@ -1746,7 +1747,11 @@ static struct msm_gpu *a5xx_gpu_init(struct drm_device *dev)
 
 	nr_rings = 4;
 
-	if (config->info->revn == 510)
+	/*
+	 * a510 preemption is broken; msm.enable_preemption=0 lets the other
+	 * a5xx opt out too (a540 faults on preempted rings under KWin).
+	 */
+	if (config->info->revn == 510 || enable_preemption == 0)
 		nr_rings = 1;
 
 	ret = adreno_gpu_init(dev, pdev, adreno_gpu, config->info->funcs, nr_rings);
