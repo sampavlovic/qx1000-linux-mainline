@@ -1587,9 +1587,13 @@ static void qcom_slim_ngd_up_worker(struct work_struct *work)
 
 	ctrl = container_of(work, struct qcom_slim_ngd_ctrl, ngd_up_work);
 
-	/* Make sure qmi service is up before continuing */
+	/*
+	 * Make sure qmi service is up before continuing. The MSM8998 ADSP
+	 * can take longer than a second to announce it after the SSR
+	 * notifier reports it up, and nothing retries after a timeout here.
+	 */
 	if (!wait_for_completion_interruptible_timeout(&ctrl->qmi_up,
-						       msecs_to_jiffies(MSEC_PER_SEC))) {
+						       msecs_to_jiffies(10 * MSEC_PER_SEC))) {
 		dev_err(ctrl->dev, "QMI wait timeout\n");
 		return;
 	}
