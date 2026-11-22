@@ -349,14 +349,6 @@ static int qrtr_node_enqueue(struct qrtr_node *node, struct sk_buff *skb,
 	size_t len = skb->len;
 	int rc, confirm_rx;
 
-	mutex_lock(&node->ep_lock);
-	if (!node->hello_sent && type != QRTR_TYPE_HELLO) {
-		mutex_unlock(&node->ep_lock);
-		kfree_skb(skb);
-		return -EAGAIN;
-	}
-	mutex_unlock(&node->ep_lock);
-
 	confirm_rx = qrtr_tx_wait(node, to->sq_node, to->sq_port, type);
 	if (confirm_rx < 0) {
 		kfree_skb(skb);
