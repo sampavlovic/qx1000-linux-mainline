@@ -3208,7 +3208,11 @@ static void ath10k_bss_disassoc(struct ieee80211_hw *hw,
 
 	arvif->def_wep_key_idx = -1;
 
-	ret = ath10k_mac_vif_recalc_txbf(ar, vif, vht_cap);
+	/* WCN3990 firmware WLAN.HL.1.0 (MSM8998) crashes on a vdev parameter
+	 * set right after vdev down; the next association sets TXBF again.
+	 */
+	ret = ar->hw_rev == ATH10K_HW_WCN3990 ? 0 :
+	      ath10k_mac_vif_recalc_txbf(ar, vif, vht_cap);
 	if (ret) {
 		ath10k_warn(ar, "failed to recalc txbf for vdev %i: %d\n",
 			    arvif->vdev_id, ret);
