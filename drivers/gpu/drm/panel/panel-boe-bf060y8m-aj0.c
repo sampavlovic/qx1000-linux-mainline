@@ -83,6 +83,16 @@ static int boe_bf060y8m_aj0_on(struct boe_bf060y8m_aj0 *boe)
 
 	mipi_dsi_msleep(&dsi_ctx, 30);
 
+	/*
+	 * Out of sleep the panel runs at its power-on brightness until the
+	 * backlight is enabled after this sequence: send the backlight's
+	 * level (0 while it is still disabled) before the display goes on, so
+	 * a wake does not flash bright, dim, then ramp up.
+	 */
+	if (boe->panel.backlight)
+		mipi_dsi_dcs_set_display_brightness_multi(&dsi_ctx,
+				backlight_get_brightness(boe->panel.backlight));
+
 	mipi_dsi_dcs_set_display_on_multi(&dsi_ctx);
 	mipi_dsi_msleep(&dsi_ctx, 50);
 
