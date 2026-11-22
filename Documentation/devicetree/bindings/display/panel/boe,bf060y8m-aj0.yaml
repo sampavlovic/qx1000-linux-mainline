@@ -42,6 +42,7 @@ properties:
 
   port: true
   reset-gpios: true
+  rotation: true
 
 required:
   - compatible
