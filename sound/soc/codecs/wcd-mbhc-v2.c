@@ -1154,6 +1154,7 @@ static void wcd_correct_swch_plug(struct work_struct *work)
 	int output_mv, cross_conn, hs_threshold, try = 0, micbias_mv;
 	bool is_spl_hs = false;
 	bool is_pa_on;
+	bool micbias_disabled = false;
 	int ret;
 
 	mbhc = container_of(work, struct wcd_mbhc, correct_plug_swch);
@@ -1218,6 +1219,7 @@ correct_plug_type:
 	while (!time_after(jiffies, timeout)) {
 		if (mbhc->hs_detect_work_stop) {
 			wcd_micbias_disable(mbhc);
+			micbias_disabled = true;
 			goto exit;
 		}
 
@@ -1297,8 +1299,18 @@ correct_plug_type:
 		wcd_mbhc_adc_update_fsm_source(mbhc, plug_type);
 
 exit:
-	if (mbhc->mbhc_cb->mbhc_micbias_control/* &&  !mbhc->micbias_enable*/)
-		mbhc->mbhc_cb->mbhc_micbias_control(component, MIC_BIAS_2, MICB_DISABLE);
+	/*
+	 * Every path into this label already released exactly one
+	 * MICB_ENABLE vote: either here, or -- for HEADPHONE, and for the
+	 * hs_detect_work_stop early exit above -- via wcd_micbias_disable()
+	 * below. Releasing it twice underflows mbhc_cb->mbhc_micbias_control's
+	 * backing refcount (wcd->sysclk_users in wcd934x), which then never
+	 * reaches zero and never reaches its enable branch either.
+	 */
+	if (plug_type != MBHC_PLUG_TYPE_HEADPHONE && !micbias_disabled) {
+		if (mbhc->mbhc_cb->mbhc_micbias_control/* &&  !mbhc->micbias_enable*/)
+			mbhc->mbhc_cb->mbhc_micbias_control(component, MIC_BIAS_2, MICB_DISABLE);
+	}
 
 	/*
 	 * If plug type is corrected from special headset to headphone,
@@ -1306,7 +1318,8 @@ exit:
 	 * disable micbias.
 	 */
 	if (plug_type == MBHC_PLUG_TYPE_HEADPHONE) {
-		wcd_micbias_disable(mbhc);
+		if (!micbias_disabled)
+			wcd_micbias_disable(mbhc);
 		/*
 		 * Enable ADC COMPLETE interrupt for HEADPHONE.
 		 * Btn release may happen after the correct work, ADC COMPLETE
