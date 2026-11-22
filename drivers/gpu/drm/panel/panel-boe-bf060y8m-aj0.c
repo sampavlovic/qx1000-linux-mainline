@@ -94,14 +94,30 @@ static void boe_bf060y8m_aj0_off(struct boe_bf060y8m_aj0 *boe)
 	struct mipi_dsi_device *dsi = boe->dsi;
 	struct mipi_dsi_multi_context dsi_ctx = { .dsi = dsi };
 
-	/* OFF commands sent in HS mode */
+	/* OFF commands sent in HS mode; display off went out in disable */
 	dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;
-	mipi_dsi_dcs_set_display_off_multi(&dsi_ctx);
-	mipi_dsi_msleep(&dsi_ctx, 20);
-
 	mipi_dsi_dcs_enter_sleep_mode_multi(&dsi_ctx);
 	mipi_dsi_usleep_range(&dsi_ctx, 1000, 2000);
 	dsi->mode_flags |= MIPI_DSI_MODE_LPM;
+}
+
+/*
+ * Display off goes out while the host still streams video. Sent from
+ * unprepare, after the stream has stopped, the panel scanned out one
+ * corrupted frame at full brightness before turning off.
+ */
+static int boe_bf060y8m_aj0_disable(struct drm_panel *panel)
+{
+	struct boe_bf060y8m_aj0 *boe = to_boe_bf060y8m_aj0(panel);
+	struct mipi_dsi_device *dsi = boe->dsi;
+	struct mipi_dsi_multi_context dsi_ctx = { .dsi = dsi };
+
+	dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;
+	mipi_dsi_dcs_set_display_off_multi(&dsi_ctx);
+	mipi_dsi_msleep(&dsi_ctx, 20);
+	dsi->mode_flags |= MIPI_DSI_MODE_LPM;
+
+	return dsi_ctx.accum_err;
 }
 
 static int boe_bf060y8m_aj0_prepare(struct drm_panel *panel)
@@ -217,6 +233,7 @@ boe_bf060y8m_aj0_get_orientation(struct drm_panel *panel)
 
 static const struct drm_panel_funcs boe_bf060y8m_aj0_panel_funcs = {
 	.prepare = boe_bf060y8m_aj0_prepare,
+	.disable = boe_bf060y8m_aj0_disable,
 	.unprepare = boe_bf060y8m_aj0_unprepare,
 	.get_modes = boe_bf060y8m_aj0_get_modes,
 	.get_orientation = boe_bf060y8m_aj0_get_orientation,
