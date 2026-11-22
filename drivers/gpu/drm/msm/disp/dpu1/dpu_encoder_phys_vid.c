@@ -539,7 +539,8 @@ static int dpu_encoder_phys_vid_wait_for_commit_done(
 		return 0;
 
 	ret = wait_event_timeout(phys_enc->pending_kickoff_wq,
-		(hw_ctl->ops.get_flush_register(hw_ctl) == 0),
+		!(hw_ctl->ops.get_flush_register(hw_ctl) &
+		  hw_ctl->ops.get_pending_flush(hw_ctl)),
 		msecs_to_jiffies(50));
 	if (ret <= 0) {
 		DPU_ERROR("vblank timeout: %x\n", hw_ctl->ops.get_flush_register(hw_ctl));
